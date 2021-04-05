@@ -1,0 +1,42 @@
+---
+title: "Checking"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+setwd('/Users/habbasi/Documents/Broad/Broad_collaborative_projects\ /Broad_profiling_projects/2016_03_14_TargetID_Wagner_Schenone_BWH/backend/MoA_Batch2/BR00092790/')
+f.path <- '../backend/C-7210-01-CMP-010-turbyville-2_collapsed.csv'
+m.path <- '../compound_annotations/2019-06-05_99dffa01_new_plate_compounds_with_tags.csv'
+fname <- 'BR00092790_normalized_variable_selected.csv'
+df <- data.frame(readr::read_csv(fname), stringsAsFactors =F)
+meta <- data.frame(readr::read_csv(m.path), stringsAsFactors =F)
+
+# merging of data
+data <- merge(df, meta, by.x="Metadata_pert_id", by.y="pert_id", all=TRUE)
+
+## Renaming of column names
+d <- rename(data, c("correlation" = "Metadata_correlation",
+                  "tag" ="Metadata_tag"))
+
+
+write.csv(d, file = "../backend/C-7210-01-CMP-010-turbyville-2_collapsed_annotations.csv")
+
+
+
+```
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

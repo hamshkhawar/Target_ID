@@ -1,0 +1,492 @@
+---
+title: "Audit_joint_whitening"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(knitr)
+library(magrittr)
+library(ggplot2)
+library(corrplot)
+library(compare)
+library(cytominer)
+library(data.table)
+library(RColorBrewer)
+library(cluster) 
+#install.packages("factoextra")# clustering algorithms
+library(factoextra) # clustering visualization
+library(dendextend)
+```
+
+# Importing Combined_drug_target Dataset
+
+```{r}
+# Path of combined data
+
+path <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/Combined_drug_target.csv"
+out <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/whitened_variable_selected"
+figpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/Github_repo/2016_03_14_TargetID_Wagner_Schenone_new/Figures/100919_Combined_Drug_target_Analysis"
+
+
+# Importing combined data
+data <- data.frame(readr::read_csv(path), stringsAsFactors = F)
+
+
+
+```
+
+# Defining Variables 
+
+```{r}
+# Metadata variables
+metadata <- colnames(data) %>%
+  stringr::str_subset(("^Metadata_"), negate = FALSE)
+
+
+# Variables
+variables <- colnames(data) %>%
+ str_subset(("^Metadata"), negate=TRUE)
+```
+
+# Standardization of variables per plate basis
+
+```{r}
+# Standardization of all variables per plate basis
+
+normalized <-
+    cytominer::normalize(
+      population = data,
+      variables = variables,
+      strata =  c("Metadata_Plate"),
+      sample = data %>% filter(Metadata_pert_type == "control"),
+      operation = "standardize"
+    )
+
+
+```
+
+# Variable Selection Step
+# Dropping columns with NA values, zero variance columns, Highly correlated variables
+
+```{r}
+set.seed(123)
+
+# sampling one fourth of no of rows 
+sample <- normalized[sample(1:nrow(normalized), 13536, replace=FALSE), ]
+
+# finding variables with NA
+Drop_NA_columns <- cytominer::drop_na_columns(sample, variables, cutoff = 0.0)
+
+
+# finding variables with zero variance
+Drop_zerovariance_columns <- cytominer::variance_threshold(variables, sample)
+
+
+
+list <- append(Drop_zerovariance_columns, Drop_NA_columns) %>% unique()
+
+# Excluding Variables
+df <- normalized %>% select(-list) 
+
+
+# Defining new Variables
+variables <- colnames(df) %>%
+ str_subset(("^Metadata"), negate=TRUE) 
+metadata <- colnames(df) %>%
+ str_subset(("^Metadata"), negate=FALSE) 
+
+# Variable Selection Step
+set.seed(123)
+
+# sampling one fourth of no of rows 
+sample <- df[sample(1:nrow(df), 13536, replace=FALSE), ]
+
+# Excluding highly correlated variables
+
+corr_threshold <- cytominer::correlation_threshold(variables, sample, cutoff=0.9, method = "pearson")
+
+# Excluding highly correlated variables and Keeping only 10 uM concentrations of compound treatment for drug Repurponsing while using all
+# compounds with all doses for Target_ID. Making a new column DMSO making a new column
+# for defining drug and target drugs and setting DMSO to NA which is required for aggregation steps as some of the compounds are common between
+# two datasets
+
+
+```
+
+# Audit of Unwhitened data
+```{r}
+dt <- df %>% select(metadata, corr_threshold)
+
+
+drug <- dt %>% filter(Metadata_Plate_Map_Name != "C-7217-01-B80-003-A549")
+
+variables <- colnames(dt) %>%
+ str_subset(("^Metadata"), negate=TRUE) 
+metadata <- colnames(dt) %>%
+ str_subset(("^Metadata"), negate=FALSE) 
+
+
+ # Function Calculating Median Pairwise Correlation
+median_pairwise_correlation <- function(df, variables, group_by) {
+  df %>%
+    dplyr::group_by_(.dots = group_by) %>%
+    do(tibble::data_frame(correlation = median(as.dist(cor(t(as.matrix(.[variables])))))))
+}
+
+
+set.seed(24)
+
+correlations <- drug %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_broad_sample","Metadata_Well", "Metadata_broad_sample_type"))
+
+
+
+# Calculation of Null threshold
+
+set.seed(123)
+
+
+null_threshold <- 
+  1:10 %>% 
+  map_df(function(i) {
+    drug %>%
+      filter(Metadata_broad_sample_type == "trt") %>%
+      tidyr::unite_("group_by", "Metadata_Well", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result <-
+  tibble::data_frame(
+    null_threshold = null_threshold,
+    fraction_strong = (sum(correlations$correlation > null_threshold) / nrow(correlations))
+    )
+
+
+result
+
+# Plotting of the Distributions
+
+g <- ggplot(correlations, aes(x=correlation, fill=Metadata_broad_sample_type)) + 
+ geom_density(position= "identity", alpha=.8) + scale_x_continuous(name = "Correlation") + xlim(-1,1) +
+        scale_y_continuous(name = "Density") +
+        ggtitle("Distribution of Median Replicate Correlations") +
+        theme_bw() +
+        theme(plot.title = element_text(size = 14, hjust = 0.5, face = "bold"),
+              text = element_text(size = 12)) + 
+     scale_fill_manual(name="Condition", labels=c("Controls", "Treatments"), values = c("#9999CC","#66CC99")) + 
+     geom_vline(xintercept=null_threshold, linetype="dashed",size=0.8, color = "black") + 
+   annotate("text", x = -0.4, y = 4.5, label = "Null threshold = 0.0257") + 
+ annotate("text", x = -0.4, y = 3.5, label = "Fraction strong = 0.95")
+ ggsave(g, file= paste0(figpath, "/", "Densityplot_DrugRepurposing.png"))
+g
+```
+
+# target_ID
+```{r}
+target <- dt %>% filter(Metadata_Plate_Map_Name == "C-7217-01-B80-003-A549")
+
+
+
+ # Function Calculating Median Pairwise Correlation
+median_pairwise_correlation <- function(df, variables, group_by) {
+  df %>%
+    dplyr::group_by_(.dots = group_by) %>%
+    do(tibble::data_frame(correlation = median(as.dist(cor(t(as.matrix(.[variables])))))))
+}
+
+ 
+set.seed(24)
+
+correlations <- target %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_broad_sample","Metadata_broad_sample_type", "Metadata_Well"))
+
+
+
+# Calculation of Null threshold
+
+set.seed(123)
+
+
+null_threshold <- 
+  1:10 %>% 
+  map_df(function(i) {
+    target %>%
+      filter(Metadata_pert_type == "trt") %>%
+      tidyr::unite_("group_by", "Metadata_Well", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result <-
+  tibble::data_frame(
+    null_threshold = null_threshold,
+    fraction_strong = (sum(correlations$correlation > null_threshold) / nrow(correlations))
+    )
+
+
+result
+
+# Plotting of the Distributions
+
+ g <- ggplot(correlations, aes(x=correlation, fill=Metadata_broad_sample_type)) + 
+ geom_density(position= "identity", alpha=.8) + scale_x_continuous(name = "Correlation",
+                           limits=c(-1, 1)) +
+        scale_y_continuous(name = "Density") +
+        ggtitle("Distribution of Median Replicate Correlations") +
+        theme_bw() +
+        theme(plot.title = element_text(size = 14, hjust = 0.5, face = "bold"),
+              text = element_text(size = 12)) + 
+     scale_fill_manual(name="Condition", labels=c("Controls", "Treatments"), values = c("#9999CC","#3399CC")) + 
+     geom_vline(xintercept=null_threshold, linetype="dashed",size=0.8, color = "black")  +
+ annotate("text", x = -0.4, y = 3.0, label = "Null threshold = 0.635") + 
+annotate("text", x = -0.4, y = 2, label = "Fraction strong = 0.625")
+  ggsave(g, file= paste0(figpath, "/", "Densityplot_target_ID.png"))
+  
+  g
+```
+
+# Audit of whitened data
+# whitening function
+```{r}
+whiten <- function(population, variables, sample, regularization_param) {
+  
+  pmeta <- str_subset(colnames(population), "^Metadata")
+  metadata <- population %>% select(pmeta)
+  
+  sample %>%
+    dplyr::collect()
+
+  sample_data <- sample %>%
+    dplyr::select(dplyr::one_of(variables)) %>%
+    as.matrix()
+
+  population %>%
+    dplyr::collect()
+
+  population_data <- population %>%
+    dplyr::select(dplyr::one_of(variables)) %>%
+    as.matrix()
+
+  # mean of sample
+  sample_mean <- colMeans(sample_data)
+
+  # covariance of sample
+  sample_cov <- cov(sample_data)
+
+  # eigen decomposition \Sigma = E * \Lambda * E'
+  eig_decomp <- eigen(sample_cov)
+
+  # compute whitening transformation, which is {\Lambda + \epsilon}^.5 x E'
+  W <- diag((eig_decomp$values + regularization_param) ^ -0.5) %*%
+    t(eig_decomp$vectors)
+
+  # apply whitening transformation, which is (X - \mu) * W'
+  transformed_population_data <- sweep(population_data, 2, sample_mean) %*% t(W)
+
+  colnames(transformed_population_data) <- paste0("PC", 1:NCOL(W))
+
+  transformed_population_data %>% as.data.frame()
+
+  transformed_population <- cbind(metadata, transformed_population_data)
+}
+```
+
+# Whitening of DrugRepurposing
+```{r}
+control_sample <- drug %>% dplyr::filter(Metadata_broad_sample_type == "control")
+
+# sample of control cells for whitening
+ set.seed(123)
+  sample_size <- 0.5*(nrow(control_sample))
+  train_indx <- sample(seq_len(nrow(control_sample)), size = sample_size)
+  control_sample <- control_sample[train_indx, ]
+
+  variables <-
+  colnames(control_sample) %>%
+  stringr::str_subset("^Nuclei_|^Cells_|^Cytoplasm_")
+
+set.seed(123)
+
+
+  drug_whiten <- whiten(population = drug,
+                      variables=variables,
+                      control_sample,
+                      regularization_param=1)
+  
+#   write.csv(drug_whiten, file = paste0(out, "/",  "drug_whitened.csv"))  
+   metadata  <- colnames(drug_whiten) %>%
+  stringr::str_subset("^Meta", negate = FALSE)
+   
+      variables  <- colnames(drug_whiten) %>%
+  stringr::str_subset("^PC", negate = FALSE)
+ 
+  # Function Calculating Median Pairwise Correlation
+median_pairwise_correlation <- function(df, variables, group_by) {
+  df %>%
+    dplyr::group_by_(.dots = group_by) %>%
+    do(tibble::data_frame(correlation = median(as.dist(cor(t(as.matrix(.[variables])))))))
+}
+
+
+set.seed(24)
+
+correlations <- drug_whiten %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_broad_sample","Metadata_Well", "Metadata_broad_sample_type"))
+
+
+
+# Calculation of Null threshold
+
+set.seed(123)
+
+
+null_threshold <- 
+  1:10 %>% 
+  map_df(function(i) {
+    drug_whiten %>%
+      filter(Metadata_broad_sample_type == "trt") %>%
+      tidyr::unite_("group_by", "Metadata_Well", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result <-
+  tibble::data_frame(
+    null_threshold = null_threshold,
+    fraction_strong = (sum(correlations$correlation > null_threshold) / nrow(correlations))
+    )
+
+
+result
+
+# Plotting of the Distributions
+
+g <- ggplot(correlations, aes(x=correlation, fill=Metadata_broad_sample_type)) + 
+ geom_density(position= "identity", alpha=.8) + scale_x_continuous(name = "Correlation") + xlim(-1,1) +
+        scale_y_continuous(name = "Density") +
+        ggtitle("Distribution of Median Replicate Correlations") +
+        theme_bw() +
+        theme(plot.title = element_text(size = 14, hjust = 0.5, face = "bold"),
+              text = element_text(size = 12)) + 
+     scale_fill_manual(name="Condition", labels=c("Controls", "Treatments"), values = c("#9999CC","#66CC99")) + 
+     geom_vline(xintercept=null_threshold, linetype="dashed",size=0.8, color = "black") + 
+   annotate("text", x = -0.4, y = 45, label = "Null threshold = 0.012") + 
+ annotate("text", x = -0.4, y = 30, label = "Fraction strong = 0.96")
+ ggsave(g, file= paste0(figpath, "/", "Densityplot_DrugRepurposing_whitened_1.png"))
+g
+```
+
+# whitening of Target_ID
+```{r}
+control_sample <- target %>% dplyr::filter(Metadata_broad_sample_type == "control")
+
+# sample of control cells for whitening
+ set.seed(123)
+  sample_size <- 0.5*(nrow(control_sample))
+  train_indx <- sample(seq_len(nrow(control_sample)), size = sample_size)
+  control_sample <- control_sample[train_indx, ]
+
+  variables <-
+  colnames(control_sample) %>%
+  stringr::str_subset("^Nuclei_|^Cells_|^Cytoplasm_")
+
+set.seed(123)
+
+
+  target_whiten <- whiten(population = target,
+                      variables=variables,
+                      control_sample,
+                      regularization_param=1)
+  
+   #write.csv(target_whiten, file = paste0(out, "/",  "target_whitened.csv"))  
+  
+   metadata  <- colnames(target_whiten) %>%
+  stringr::str_subset("^Meta", negate = FALSE)
+   
+      variables  <- colnames(target_whiten) %>%
+  stringr::str_subset("^PC", negate = FALSE)
+ 
+  # Function Calculating Median Pairwise Correlation
+median_pairwise_correlation <- function(df, variables, group_by) {
+  df %>%
+    dplyr::group_by_(.dots = group_by) %>%
+    do(tibble::data_frame(correlation = median(as.dist(cor(t(as.matrix(.[variables])))))))
+}
+
+
+set.seed(24)
+
+correlations <- target_whiten %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_broad_sample","Metadata_Well", "Metadata_broad_sample_type"))
+
+
+
+# Calculation of Null threshold
+
+set.seed(123)
+
+
+null_threshold <- 
+  1:10 %>% 
+  map_df(function(i) {
+    target_whiten %>%
+      filter(Metadata_broad_sample_type == "trt") %>%
+      tidyr::unite_("group_by", "Metadata_Well", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result <-
+  tibble::data_frame(
+    null_threshold = null_threshold,
+    fraction_strong = (sum(correlations$correlation > null_threshold) / nrow(correlations))
+    )
+
+
+result
+
+# Plotting of the Distributions
+
+g <- ggplot(correlations, aes(x=correlation, fill=Metadata_broad_sample_type)) + 
+ geom_density(position= "identity", alpha=.8) + scale_x_continuous(name = "Correlation") + xlim(-1,1) + 
+        scale_y_continuous(name = "Density") +
+        ggtitle("Distribution of Median Replicate Correlations") +
+        theme_bw() +
+        theme(plot.title = element_text(size = 14, hjust = 0.5, face = "bold"),
+              text = element_text(size = 12)) + 
+     scale_fill_manual(name="Condition", labels=c("Controls", "Treatments"), values = c("#9999CC","#3399CC")) + 
+     geom_vline(xintercept=null_threshold, linetype="dashed",size=0.8, color = "black") +
+   annotate("text", x = -0.4, y = 6, label = "Null threshold = 0.21") + 
+ annotate("text", x = -0.4, y = 4, label = "Fraction strong = 0.59")
+ ggsave(g, file= paste0(figpath, "/", "Densityplot_target_whitened_1.png"))
+g
+
+
+
+
+```
+
+

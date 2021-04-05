@@ -1,0 +1,96 @@
+---
+title: "Suspicious_DMSO_platemap"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(magrittr)
+library(tidyverse)
+```
+
+
+
+```{r cars}
+```
+
+
+```{r cars}
+data <- read_csv("/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/R/Target_ID_suspiciousDMSO.csv")
+
+data <- data %>% filter(data$Metadata_Plate == "BR00092790")
+p <- 
+  platetools::raw_map(data =
+                      as.character(data$Metadata_type),
+                      well = data$Metadata_Well,
+                      plate = 384) +
+  theme_dark() +
+  scale_fill_discrete()
+
+print(p)
+```
+
+
+```{r cars}
+data <- read_csv("/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/R/Target_ID_suspiciousDMSO.csv")
+
+data <- data %>% filter(data$Metadata_Plate == "BR00092791")
+p <- 
+  platetools::raw_map(data =
+                      as.character(data$Metadata_type),
+                      well = data$Metadata_Well,
+                      plate = 384) +
+  theme_dark() +
+  scale_fill_discrete()
+
+print(p)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+data <- read_csv("/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/R/Target_ID_suspiciousDMSO.csv")
+
+data <- data %>% filter(data$Metadata_Plate == "BR00092792")
+p <- 
+  platetools::raw_map(data =
+                      as.character(data$Metadata_type),
+                      well = data$Metadata_Well,
+                      plate = 384) +
+  theme_dark() +
+  scale_fill_discrete()
+print(p)
+
+```
+
+
+```{r pressure, echo=FALSE}
+data <- read_csv("/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/R/Target_ID_suspiciousDMSO.csv")
+
+data <- data %>% filter(data$Metadata_Plate == "BR00092793")
+p <- 
+  platetools::raw_map(data =
+                      as.character(data$Metadata_type),
+                      well = data$Metadata_Well,
+                      plate = 384) +
+  theme_dark() +
+  scale_fill_discrete()
+print(p)
+```
+
+
+```{r pressure, echo=FALSE}
+data <- read_csv("/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/R/Target_ID_suspiciousDMSO.csv")
+
+data <- data %>% filter(data$Metadata_Plate == "BR00092794")
+p <- 
+  platetools::raw_map(data =
+                      as.character(data$Metadata_type),
+                      well = data$Metadata_Well,
+                      plate = 384) +
+  theme_dark() +
+  scale_fill_discrete()
+print(p)
+```
+

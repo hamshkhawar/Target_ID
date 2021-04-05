@@ -1,0 +1,336 @@
+---
+title: "Joint_whitening"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r}
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(cytominer)
+library(psych)
+```
+
+```{r}
+# path of combined CSVs of Target_ID and Drug_Repurposing
+
+inpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/Raw_drug_target_median_profiles/Combined_drug_target.csv"
+outpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/whitened_variable_selected"
+figpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/Github_repo/2016_03_14_TargetID_Wagner_Schenone_new/Figures/100919_Combined_Drug_target_Analysis"
+variable_fpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/metadata/final_variables.txt"
+
+# importing variable list (feature selected)
+variable_list <- read.table(variable_fpath) %>% as.matrix %>% as.vector %>% unlist()
+
+
+data <- data.frame(readr::read_csv(inpath), stringsAsFactors = TRUE)
+
+# Return column names which starts with Metadata
+metadata <- stringr::str_subset(colnames(data), "^Metadata", negate = FALSE)
+
+
+
+# Selecting Control cells 
+ dmso <- data %>%
+      filter(Metadata_pert_type == "control") %>%
+      dplyr::collect()
+ 
+ # doing the Principle component analysis without scaling and standardization
+pca <- prcomp(dmso[, variable_list], scale = FALSE)
+pc <- pca$rotation
+
+# Separating metadata and variable columns in final combined data
+dt_variables <- data %>% select_at(variable_list)  %>% dplyr::collect()
+dt_metadata <- data %>% select_at(metadata)  %>% dplyr::collect()
+
+# prediction of PCs for combined dataset
+
+prediction <- as.matrix(data[, variable_list]) %*% pc
+pc_data <- cbind(dt_metadata, as.data.frame(prediction))
+
+# Selecting control cells for data normalization after pc whitening
+
+pc_dmso <- pc_data %>%
+  filter(Metadata_pert_type == "control") %>%
+      dplyr::collect()
+
+pc_variables <- stringr::str_subset(colnames(pc_data), "^PC", negate = FALSE)
+pc_metadata <- stringr::str_subset(colnames(pc_data), "^PC", negate = TRUE)
+ 
+
+# calculating mean and standard_deviation of control condition
+mn <- apply(pc_dmso %>% select(one_of(pc_variables)), 2, function(x) mean(x, na.rm = T))
+sdv <- apply(pc_dmso %>% select(one_of(pc_variables)), 2, function(x) sd(x, na.rm = T))
+    
+scale_data <- scale(pc_data[, pc_variables], center = mn, scale = sdv)
+scale_data <- as.data.frame(scale_data)
+
+# Normalized data
+
+population <- cbind(dt_metadata, scale_data)
+```
+
+# Whitening Function
+```{r}
+whiten <- function(population, variables, sample, regularization_param) {
+  
+  pmeta <- str_subset(colnames(population), "^Metadata")
+  metadata <- population %>% select(pmeta)
+  
+  sample %>%
+    dplyr::collect()
+
+  sample_data <- sample %>%
+    dplyr::select(dplyr::one_of(variables)) %>%
+    as.matrix()
+
+  population %>%
+    dplyr::collect()
+
+  population_data <- population %>%
+    dplyr::select(dplyr::one_of(variables)) %>%
+    as.matrix()
+
+  # mean of sample
+  sample_mean <- colMeans(sample_data)
+
+  # covariance of sample
+  sample_cov <- cov(sample_data)
+
+  # eigen decomposition \Sigma = E * \Lambda * E'
+  eig_decomp <- eigen(sample_cov)
+
+  # compute whitening transformation, which is {\Lambda + \epsilon}^.5 x E'
+  W <- diag((eig_decomp$values + regularization_param) ^ -0.5) %*%
+    t(eig_decomp$vectors)
+
+  # apply whitening transformation, which is (X - \mu) * W'
+  transformed_population_data <- sweep(population_data, 2, sample_mean) %*% t(W)
+
+  colnames(transformed_population_data) <- paste0("PC", 1:NCOL(W))
+
+  transformed_population_data %>% as.data.frame()
+
+  transformed_population <- cbind(metadata, transformed_population_data)
+}
+
+```
+
+
+```{r}
+control_sample <- population %>% 
+                  dplyr::filter(Metadata_pert_type == "control")
+
+
+variables <-
+  colnames(control_sample) %>%
+  stringr::str_subset("^PC")
+
+  data_whiten <- whiten(population = population,
+                      variables=variables,
+                      control_sample,
+                      regularization_param=1)
+ 
+ 
+ write.csv(data_whiten, file = paste0(outpath, "/", "combined_target_drug_whitened_1", ".csv"))
+```
+
+# Median Replicate correlation
+```{r}
+# Function Calculating Median Pairwise Correlation
+
+median_pairwise_correlation <- function(df, variables, group_by) {
+  df %>%
+    dplyr::group_by_(.dots = group_by) %>%
+    do(tibble::data_frame(correlation = median(as.dist(cor(t(as.matrix(.[variables])))))))
+}
+
+# Filtering data of Drug Repurposing
+drug_df <- data_whiten %>%
+  filter(str_detect(Metadata_Plate_Map_Name, "C-7161-01-LM6")) %>% 
+  dplyr::collect()
+
+
+# Filtering data of target
+target_df <- data_whiten %>% 
+  filter(str_detect(Metadata_Plate_Map_Name, "C-7217-01")) %>% 
+  dplyr::collect()
+```
+
+
+```{r}
+set.seed(24)
+
+# Calculating median Correlation for Drug data
+  correlations_drug <- drug_df %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_broad_sample","Metadata_broad_sample_type","Metadata_Well"))
+
+write.csv(correlations_drug, file=paste0(outpath, "/", "Second_Drug_jointwhitened_1", "_", "audit", ".csv"))
+
+  
+
+# Calculating median Correlation for Target ID
+correlations_target <- target_df %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_broad_sample","Metadata_broad_sample_type","Metadata_Well"))
+
+write.csv(correlations_target, file=paste0(outpath, "/",  "Second_Target_ID_jointwhitened_1", "_", "audit", ".csv"))
+
+# Calculating median Correlation for combined data
+  correlations_combined <- data_whiten %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_broad_sample","Metadata_broad_sample_type","Metadata_Well"))
+
+write.csv(correlations_drug, file=paste0(outpath, "/", "Second_Combined_jointwhitened_1", "_", "audit", ".csv"))
+
+
+
+# Calculation of Null threshold of drug
+
+set.seed(123)
+
+
+null_threshold_drug <- 
+  1:10 %>% 
+  map_df(function(i) {
+    drug_df %>%
+      filter(Metadata_pert_type == "trt") %>%
+      tidyr::unite_("group_by", "Metadata_Well", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result_drug <-
+  tibble::data_frame(
+    null_threshold = null_threshold_drug,
+    fraction_strong = (sum(correlations_drug$correlation > null_threshold_drug) / nrow(correlations_drug))
+    )
+
+write.csv(result_drug, file=paste0(outpath, "/",  "Second_Drug_jointwhitened_1", "_", "audit_details", ".csv"))
+
+
+# Calculation of Null threshold of target
+null_threshold_target <- 
+  1:10 %>% 
+  map_df(function(i) {
+    target_df %>%
+      filter(Metadata_pert_type == "trt") %>%
+      tidyr::unite_("group_by", "Metadata_Well", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result_target <-
+  tibble::data_frame(
+    null_threshold = null_threshold_target,
+    fraction_strong = (sum(correlations_target$correlation > null_threshold_target) / nrow(correlations_target))
+    )
+
+write.csv(result_target, file=paste0(outpath, "/",  "Second_Target_jointwhitened_1", "_", "audit_details", ".csv"))
+
+
+
+# Calculation of Null threshold of combined
+
+set.seed(123)
+
+
+null_threshold_combined <- 
+  1:10 %>% 
+  map_df(function(i) {
+    data_whiten %>%
+      filter(Metadata_pert_type == "trt") %>%
+      tidyr::unite_("group_by", "Metadata_Well", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result_combined <-
+  tibble::data_frame(
+    null_threshold = null_threshold_drug,
+    fraction_strong = (sum(correlations_combined$correlation > null_threshold_combined) / nrow(correlations_combined))
+    )
+
+write.csv(result_combined, file=paste0(outpath, "/",  "Second_Combined_jointwhitened_1", "_", "audit_details", ".csv"))
+
+```
+
+
+```{r}
+# Plotting Distributions for Drug
+    
+     g <- ggplot(data = correlations_drug, aes(x= correlation, color = Metadata_broad_sample_type, fill=Metadata_broad_sample_type))     + 
+  geom_histogram(alpha=.3) + 
+  facet_wrap(~Metadata_broad_sample_type , scales = "free") +
+  ggtitle('Distribution of median replicate correlation \n Drug_Rep [joint whitening]') +
+  theme_bw() +
+  scale_fill_manual(values = c("#00AFBB", "#E7B800")) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800")) +
+  theme(axis.text = element_text(size=13), text = element_text(size=10)) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(legend.title=element_blank()) + geom_vline(xintercept=null_threshold_drug, linetype="dashed",size=0.8, color = "black") 
+
+   ggsave(paste0(figpath, "/", "Second_Distribution_median_replicate_correlation_Drug_joinwhitening", "_", ".png"), g, width = 7, height = 5)
+
+g
+```
+
+
+```{r}
+# Plotting Distributions for Target
+    
+     g <- ggplot(data = correlations_target, aes(x= correlation, color = Metadata_broad_sample_type, fill=Metadata_broad_sample_type))     + 
+  geom_histogram(alpha=.3) + 
+  facet_wrap(~Metadata_broad_sample_type , scales = "free") +
+  ggtitle('Distribution of median replicate correlation \n Target_ID [joint whitening]') +
+  theme_bw() +
+  scale_fill_manual(values = c("#00AFBB", "#FC4E07")) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme(axis.text = element_text(size=13), text = element_text(size=10)) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(legend.title=element_blank()) + geom_vline(xintercept=null_threshold_target, linetype="dashed",size=0.8, color = "black")
+
+   ggsave(paste0(figpath, "/", "Second_Distribution_median_replicate_correlation_Target_joinwhitening", "_", ".png"), g, width = 7, height = 5)
+
+g
+```
+
+
+```{r}
+# Plotting Distributions for Combined
+    
+     g <- ggplot(data = correlations_combined, aes(x= correlation, color = Metadata_broad_sample_type, fill=Metadata_broad_sample_type))     + 
+  geom_histogram(alpha=.3) + 
+  facet_wrap(~Metadata_broad_sample_type , scales = "free") +
+  ggtitle('Distribution of median replicate correlation \n Combined [joint whitening]') +
+  theme_bw() +
+  scale_fill_manual(values = c("#00AFBB", "#E7B800")) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800")) +
+  theme(axis.text = element_text(size=13), text = element_text(size=10)) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(legend.title=element_blank()) + geom_vline(xintercept=null_threshold_combined, linetype="dashed",size=0.8, color = "black")
+
+   ggsave(paste0(figpath, "/", "Second_Distribution_median_replicate_correlation_Combined_joinwhitening", "_", ".png"), g, width = 7, height = 5)
+
+g
+
+```
+

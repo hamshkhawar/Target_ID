@@ -1,0 +1,234 @@
+---
+title: "Compare Replicate Correlation"
+output: html_notebook
+---
+
+```{r}
+
+```
+
+
+```{r}
+#Changing a working directory
+
+setwd("/Users/habbasi/Documents/Broad/Broad_collaborative_projects\ /Broad_profiling_projects/2016_03_14_TargetID_Wagner_Schenone_BWH/Github_repo/2016_03_14_TargetID_Wagner_Schenone_BWH/Scripts")
+
+
+
+```
+
+```{r}
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(readr)
+library(knitr)
+library(magrittr)
+library(readbulk)
+library(data.table)
+
+```
+
+```{r}
+
+
+plate.list <- read.table("../../../metadata/plates.txt", header = F) %>% as.matrix() %>% as.vector() %>% unlist()
+pmeta <- data.frame(readr::read_csv("../../../metadata/MoA collection for cell painting.csv"), stringsAsFactors = TRUE)
+# Selecting only 5 column variables
+pmeta <- pmeta[,1:5]
+
+# Renaming of column names in pmeta
+
+pmeta <- setnames(pmeta, c("BRD", "common.name","submitter", "activity", "max.conc..uM."), c("Metadata_broad_sample", "Metadata_common_name","Metadata_submitter", "Metadata_activity", "Metadata_max_conc (uM)"))
+
+
+f.path <- NULL
+data <- NULL
+for (p in 1:length(plate.list)){
+  f.path[p]<- paste0("../../../backend/MoA_Batch2/", plate.list[p], "/", plate.list[p], "_normalized_variable_selected.csv")
+  d <- data.frame(readr::read_csv(f.path[p]), stringsAsFactors = TRUE)
+  data <- rbind(data, d)
+}
+
+# Comibining the metadata columns to data
+
+ #data <- merge(pmeta, data, by.x = "Metadata_broad_sample", by.y ="Metadata_broad_sample" )
+
+```
+
+```{r}
+
+ # Variables(Cell/Nuclei/Cytoplasm)
+variables <-
+  colnames(data) %>%
+  stringr::str_subset("^Nuclei_|^Cells_|^Cytoplasm_")
+
+# Metadata variables
+
+metadata <-
+  colnames(data) %>%
+  stringr::str_subset("^Metadata_")
+
+
+# 
+# 
+# 
+# strata <- c(
+#   "Metadata_broad_sample","Metadata_cell_id","Metadata_pert_id",
+#   "Metadata_mg_per_ml","Metadata_mmoles_per_liter","Metadata_compound_name"
+# )
+
+
+
+```
+
+```{r}
+# Function Calculating Median Pairwise Correlation
+
+median_pairwise_correlation <- function(data, variables, group_by) {
+  data %>%
+    dplyr::group_by_(.dots = group_by) %>%
+    do(tibble::data_frame(correlation = median(as.dist(cor(t(as.matrix(.[variables])))))))
+}
+
+set.seed(24)
+
+# Calculating correlations for different Celllines
+
+correlations <- data %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_Plate", "Metadata_broad_sample"))
+
+c <- correlations %>% 
+  group_by(Metadata_broad_sample) %>%
+  arrange(desc(correlation)) 
+
+```
+
+```{r}
+# Calculation of Null threshold
+null_threshold <- 
+  1:10 %>% 
+  map_df(function(i) {
+    data %>%
+      tidyr::unite_("group_by", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result <-
+  tibble::data_frame(
+    null_threshold = null_threshold,
+    fraction_strong = (sum(correlations$correlation > null_threshold) / nrow(correlations))
+    )
+
+result
+```
+
+```{r}
+
+# Plotting
+p <- ggplot(c, aes(x=c$Metadata_broad_sample, y=c$correlation)) +
+        geom_line(aes(group = c$Metadata_broad_sample )) +
+        geom_point(aes(color = c$Metadata_Plate)) +
+        geom_hline(yintercept = 0.0240, linetype= "dashed", size=0.5, color="red") +
+        labs(x = "Compounds", y= "Correlations") +
+        theme_bw() + guides(color=guide_legend("Plates")) +
+        coord_flip() +
+        theme_update(plot.title = element_text(hjust = 0.5)) +
+        ggtitle("Replicate Correlation")
+ggsave(filename='TargetID_Replicate_correlation.pdf', plot = p, path = '../Figures/')
+    
+p
+```
+
+```{r}
+# Parsing data for different Cell lines
+
+data_U2oS <- subset(data, Metadata_Plate_Map_Name == "C-7217-01-B80-003-U2OS", select = colnames(data))
+data_A549 <- subset(data, Metadata_Plate_Map_Name == "C-7217-01-B80-003-A549", select = colnames(data))
+```
+
+```{r}
+# Function Calculating Median Pairwise Correlation
+
+median_pairwise_correlation <- function(data, variables, group_by) {
+  data %>%
+    dplyr::group_by_(.dots = group_by) %>%
+    do(tibble::data_frame(correlation = median(as.dist(cor(t(as.matrix(.[variables])))))))
+}
+
+set.seed(24)
+
+# Calculating correlations for different Celllines
+
+correlations_U2oS <- data_U2oS %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_Plate", "Metadata_broad_sample"))
+
+
+
+correlations_A549 <- data_A549 %>%
+  median_pairwise_correlation(variables, group_by = c("Metadata_Plate", "Metadata_broad_sample"))
+
+
+
+
+```
+
+```{r}
+# Calculation of Null threshold for U2oS
+null_threshold <- 
+  1:10 %>% 
+  map_df(function(i) {
+    data_U2oS %>%
+      tidyr::unite_("group_by", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result_U2oS <-
+  tibble::data_frame(
+    null_threshold = null_threshold,
+    fraction_strong = (sum(correlations$correlation > null_threshold) / nrow(correlations))
+    )
+
+result_U2oS
+```
+
+```{r}
+# Calculation of Null threshold for U2oS
+null_threshold <- 
+  1:10 %>% 
+  map_df(function(i) {
+    data_A549 %>%
+      tidyr::unite_("group_by", "Metadata_broad_sample") %>%
+      mutate(group_by = sample(group_by)) %>%
+      median_pairwise_correlation(variables, "group_by")
+  }) %>%
+  magrittr::extract2("correlation") %>%
+  quantile(0.95, na.rm = TRUE)
+
+
+
+result_A549 <-
+  tibble::data_frame(
+    null_threshold = null_threshold,
+    fraction_strong = (sum(correlations$correlation > null_threshold) / nrow(correlations))
+    )
+
+result_A549
+```
+
+```{r}
+ggplot(c) + geom_density(aes(x = correlation, fill = Metadata_cell_id), alpha = 0.2)
+  ggtitle('distribution replicate correaltion - U2OS')
+
+```
+

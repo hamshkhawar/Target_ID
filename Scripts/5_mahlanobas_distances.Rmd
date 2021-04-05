@@ -1,0 +1,166 @@
+---
+title: "Mahalanobis Distance"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(knitr)
+library(magrittr)
+library(ggplot2)
+library(cytominer)
+library(caret)
+library(matrixStats)
+library(wesanderson)
+```
+
+# Importing Combined_drug_target Dataset
+
+```{r}
+# Path of combined data
+
+path<- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/combined_normalized_variable_selected/normalized_variable_selected_drug_target.csv"
+
+
+out <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/combined_normalized_variable_selected"
+
+
+
+figpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/Github_repo/2016_03_14_TargetID_Wagner_Schenone_new/Figures/012020/"
+```
+
+
+# Mahalanobis Distance Calculated using Normalized features
+# Importing normalized data
+
+```{r}
+
+data_normalized <- data.frame(readr::read_csv(path), stringsAsFactors = F)
+data_normalized$X1 <- NULL
+
+```
+
+# Defining Variables 
+
+```{r}
+# Metadata variables
+metadata <- colnames(data_normalized) %>%
+  stringr::str_subset(("^Metadata_"), negate = FALSE)
+
+
+# Variables
+variables <- colnames(data_normalized) %>%
+ str_subset(("^Metadata"), negate=TRUE)
+
+```
+
+# Filtering out trouble making variables as they have determinant zero and inverse of covariance matrix cannot be calculated
+```{r}
+var <- c("Cells_Neighbors_SecondClosestDistance_Adjacent", "Cytoplasm_AreaShape_MaxFeretDiameter", "Cytoplasm_AreaShape_MinFeretDiameter","Cytoplasm_Intensity_MinIntensityEdge_DNA", "Cytoplasm_Intensity_MinIntensity_DNA", "Cells_Neighbors_AngleBetweenNeighbors_Adjacent")
+
+df <- data_normalized %>% 
+  select(-var)
+
+# Filtering out DMSO cells for both Drug Repurposing and Target datasets for calculating Mahlanobis distance on DMSO's
+
+df_dmso <- df %>% 
+  filter(Metadata_broad_sample_type == "control")
+
+
+# Defining new Variables
+variables <- colnames(df) %>%
+ str_subset(("^Metadata"), negate=TRUE) 
+
+# Calculating Mahlanobis distance of controls separately and taking the 85th percentile of MD values are taken as a cutoff
+
+df_dmso$Metadata_MD <- mahalanobis(df_dmso[, variables], colMeans(df_dmso[, variables]), cov(df_dmso[, variables]))
+df_dmso$Metadata_MD %>% round(2)
+
+control_threshold <- df_dmso %>% 
+   select(Metadata_MD) %>% 
+   as.matrix() %>% 
+  quantile(., c(.85)) %>%
+  round(2)
+
+
+label <- c("Total no of Samples: 3614 \n \n Threshold value \n 85th Percentile value: 1129.38")
+g1 <- ggplot(data=df_dmso, aes(df_dmso$Metadata_MD)) + 
+  geom_histogram(
+                 col="red", 
+                 fill="green", 
+                 alpha = .2) + 
+  geom_vline(aes(xintercept=control_threshold), 
+                                          color="black", 
+                                          linetype="dashed") +
+   geom_text(aes(x=1800, y=700),
+           label= label,hjust=0, size=4, color="#636363") +
+  annotate("rect",xmin=0,
+                  xmax = control_threshold,ymin=0,
+                  ymax=900, alpha=.2, fill="red") +
+  labs(x="Distances", y="Frequency") +
+     ggtitle(label = "Distribution of Mahalanobis Distances of DMSO's") + theme(
+  plot.title = element_text(hjust = 0.5)
+)
+ 
+
+g1
+ggsave(g1, filename=paste0(figpath, "/", "MD_Z_normalized_features_DMSO_85th_percentile.png"))
+```
+
+
+# Calculating Mahlanobis Distance of samples
+```{r}
+
+df$Metadata_MD <- mahalanobis(df[, variables], colMeans(df[, variables]), cov(df[, variables]))
+df$Metadata_MD %>% round(2)
+
+
+df_trt <- df %>% filter(Metadata_broad_sample_type == "trt")
+
+# Adding text to plot
+
+label <- c("14.144% (7658 out of 54143) samples retained \n \n Treatments retained (85 percentile thresholding) \n DrugRepurposing: 528 out of 1570 \n Target_ID: 36 out of 81")
+
+ g2 <- ggplot(data=df_trt, aes(df_trt$Metadata_MD)) + 
+  geom_histogram(
+                 col="red", 
+                 fill="green", 
+                 alpha = .2) + 
+    geom_text(aes(x=15000, y=35000),
+           label= label,hjust=0, size=4, color="#636363") +
+  geom_vline(aes(xintercept=control_threshold), 
+                                          color="black", 
+                                          linetype="dashed") +
+  annotate("rect",xmin=-1,
+                  xmax = control_threshold,ymin=0,
+                  ymax=41000, alpha=.2, fill="blue") +
+  labs(x="Distances", y="Frequency") +
+     ggtitle(label = "Distribution of Mahalanobis Distances of Treatments") + theme(
+  plot.title = element_text(hjust = 0.5)
+)
+g2
+
+ggsave(g2, filename=paste0(figpath, "/", "MD_Z_normalized_features_Treatments_85th_percentile.png"))
+
+```
+
+
+# Keeping only the Treatments which are above the threshold which is 85th percentile of DMSO's Mahalanobis Distance
+
+```{r}
+
+df$Metadata_Assignment <- FALSE
+df$Metadata_Assignment[df$Metadata_MD > control_threshold] <- TRUE
+
+
+write.csv(df, paste0(out, "/", "normalized_variable_selected_drug_target_MD_85th_percentile.csv"))
+
+
+
+```
+

@@ -1,0 +1,59 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(knitr)
+library(magrittr)
+```
+
+```{r setup, include=FALSE}
+setwd("/Users/habbasi/Documents/Broad/Broad_collaborative_projects\ /Broad_profiling_projects/2016_03_14_TargetID_Wagner_Schenone_BWH/Github_repo/2016_03_14_TargetID_Wagner_Schenone_BWH/Scripts")
+```
+
+```{r}
+plate.list <- read.table("../../../metadata/plates.txt", header = F) %>% as.matrix() %>% as.vector() %>% unlist()
+
+f.path <- NULL
+data <- NULL
+for (p in 1:length(plate.list)){
+  f.path[p]<- paste0("../../../backend/MoA_Batch2/", plate.list[p], "/", plate.list[p], "_augmented.csv")
+  d <- data.frame(readr::read_csv(f.path[p]), stringsAsFactors = TRUE)
+  data <- rbind(data, d)
+}
+
+# Variables(Cell/Nuclei/Cytoplasm)
+variables <-
+  colnames(data) %>%
+  stringr::str_subset("^Nuclei_|^Cells_|^Cytoplasm_")
+
+# Metadata variables
+
+metadata <-
+  colnames(data) %>%
+  stringr::str_subset("^Metadata_")
+
+```
+
+
+
+```{r}
+
+  mn <- apply(data %>% select(one_of(variables)), 2, function(x) mean(x, na.rm = T))
+    sdv <- apply(data %>% select(one_of(variables)), 2, function(x) sd(x, na.rm = T))
+    
+    data_scaled <- scale(data[, variables], center = mn, scale = sdv)
+    data_scaled <- as.data.frame(data_scaled)
+    
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

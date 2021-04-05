@@ -1,0 +1,47 @@
+---
+title: "Untitled"
+output: html_document
+---
+```{r}
+#library(cytominer)
+library(stringr)
+library(dplyr)
+library(tidyr)
+```
+
+```{r setup, include=FALSE}
+setwd("/Users/habbasi/Documents/Broad/Broad_collaborative_projects\ /Broad_profiling_projects/2016_03_14_TargetID_Wagner_Schenone_BWH/Github_repo/2016_03_14_TargetID_Wagner_Schenone_BWH/Scripts")
+```
+
+```{r}
+
+plate.list <- read.table("../../../metadata/plates.txt", header = F) %>% as.matrix() %>% as.vector() %>% unlist()
+
+var.list <- read.table("../../../metadata/manual.txt", header = F) %>% as.matrix() %>% as.vector() %>% unlist()
+
+
+f.path <- NULL
+data <- NULL
+for (p in 1:length(plate.list)){
+  f.path[p]<- paste0("../../../backend/MoA_Batch2/", plate.list[p], "/", plate.list[p], "_normalized.csv")
+  data <- data.frame(readr::read_csv(f.path[p]), stringsAsFactors = TRUE)
+  
+  variables <-
+  colnames(data) %>%
+  stringr::str_subset("^Nuclei_|^Cells_|^Cytoplasm_")
+
+# Metadata variables
+metadata <-
+  colnames(data) %>%
+  stringr::str_subset("^Metadata_")
+
+d <- data %>% select(metadata, var.list) %>% dplyr::collect()
+
+write.csv(d, file = paste0("../../../backend/MoA_Batch2/", plate.list[p], "/", plate.list[p], "_normalized_var_removed.csv"))
+}
+
+```
+
+
+
+`

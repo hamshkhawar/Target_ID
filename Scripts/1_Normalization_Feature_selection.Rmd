@@ -1,0 +1,143 @@
+---
+title: "Variable Selection"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(knitr)
+library(magrittr)
+library(cytominer)
+library(data.table)
+
+
+```
+
+# Importing Combined_drug_target Dataset
+
+```{r}
+# Path of combined data
+
+path <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/Raw_drug_target_median_profiles/Combined_drug_target.csv"
+
+out <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/outputs"
+
+
+
+
+# Importing combined data
+
+data <- data.frame(readr::read_csv(path))
+
+
+
+```
+
+# Defining Variables 
+
+```{r}
+# Metadata variables
+ metadata <- colnames(data) %>%
+  stringr::str_subset(("^Metadata_"), negate = FALSE)
+
+
+# Variables
+variables <- colnames(data) %>%
+ str_subset(("^Metadata"), negate=TRUE)
+```
+
+# Standardization of variables per plate basis
+
+```{r}
+# Standardization of all variables per plate basis
+
+normalized <-
+    cytominer::normalize(
+      population = data,
+      variables = variables,
+      strata =  c("Metadata_Plate"),
+      sample = data %>% filter(Metadata_pert_type == "control"),
+      operation = "standardize"
+    )
+
+
+```
+
+# Variable Selection Step
+# Dropping columns with NA values, zero variance columns, Highly correlated variables
+
+```{r}
+set.seed(123)
+
+
+
+# sampling one fourth of no of rows 
+sample <- normalized[sample(1:nrow(normalized), 18048, replace=FALSE), ]
+
+
+# finding variables with NA
+Drop_NA_columns <- cytominer::drop_na_columns(sample, variables, cutoff = 0.0)
+
+
+# finding variables with zero variance
+Drop_zerovariance_columns <- cytominer::variance_threshold(variables, sample)
+
+
+# Manual removal of Location and object_Number variables
+
+manual <- variables[grepl('Granularity_14|Granularity_15|Granularity_16|Manders|RWC|Location|Number_Object_Number|Center|ObjectNumber|Parent', variables)]
+
+variables_to_remove <- c(Drop_zerovariance_columns, Drop_NA_columns, manual) %>% unique()
+
+# Excluding Variables
+df <- normalized %>% select(-variables_to_remove) 
+
+
+# Defining new Variables
+variables <- colnames(df) %>%
+ str_subset(("^Metadata"), negate=TRUE) 
+metadata <- colnames(df) %>%
+ str_subset(("^Metadata"), negate=FALSE) 
+
+# Variable Selection Step
+set.seed(123)
+
+# sampling one fourth of no of rows 
+sample <- df[sample(1:nrow(df), 18048, replace=FALSE), ]
+
+# Excluding highly correlated variables
+
+corr_threshold <- cytominer::correlation_threshold(variables, sample, cutoff=0.9, method = "pearson")
+```
+
+# Selecting of final variables
+```{r}
+
+
+final  <- df %>% select(metadata, corr_threshold)
+
+# Defining new Variables
+variables <- colnames(final) %>%
+ str_subset(("^Metadata"), negate=TRUE) 
+metadata <- colnames(final) %>%
+   str_subset(("^Metadata"), negate=FALSE)
+
+write.table(variables, sep = "\t", row.names = F, file="/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/metadata/final_variable_selection.txt")
+
+write.csv(final, "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/combined_normalized_variable_selected/normalized_variable_selected_drug_target.csv")
+
+
+
+```
+
+
+
+```
+
+
+

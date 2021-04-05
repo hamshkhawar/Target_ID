@@ -1,0 +1,46 @@
+---
+title: "Selecting_common_variables"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+outpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/2015_10_05_DrugRepurposing_AravindSubramanian_GolubLab_Broad/metadata" 
+
+
+p1 <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/2015_10_05_DrugRepurposing_AravindSubramanian_GolubLab_Broad/2016_04_01_a549_48hr_batch1/SQ00015116/SQ00015116.csv"
+
+p2 <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/2015_10_05_DrugRepurposing_AravindSubramanian_GolubLab_Broad/2016_04_01_a549_48hr_batch1/SQ00015112/SQ00015112.csv"
+
+p3 <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/backend/MoA_Batch2/BR00092790/BR00092790.csv"
+
+d1 <- data.frame(readr::read_csv(p1), stringsAsFactors = TRUE)
+d2 <- data.frame(readr::read_csv(p2), stringsAsFactors = TRUE)
+d3 <- data.frame(readr::read_csv(p3), stringsAsFactors = TRUE)
+
+c1  <- colnames(d1) %>% stringr::str_subset("^Metadata", negate = TRUE)
+c2  <- colnames(d2) %>% stringr::str_subset("^Metadata", negate = TRUE)
+c3  <- colnames(d3) %>% stringr::str_subset("^Metadata", negate = TRUE)
+
+
+
+c4 <- intersect(c1, c2)
+c5 <- as.data.frame(intersect(c4, c3))
+
+
+setdiff(c3, c5)  # Cheking no of unmatched column variables
+
+
+write.table(c5, sep="\t",row.names=FALSE, col.names=FALSE, file = paste0(outpath, "/", "variables_list", ".txt" ))
+
+
+
+
+
+
+```
+

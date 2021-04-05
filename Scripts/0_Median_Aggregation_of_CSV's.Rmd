@@ -1,0 +1,190 @@
+---
+title: "Aggregation of CSVs"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(cytominer)
+```
+
+
+## Aggregating CSV's for Target ID
+## Note: for target ID project I have used unnormalized CSV's and merge with metadata which contains 
+## MoA and perturbation name
+```{r}
+# path of backend files of Target_ID project
+
+inpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/backend/MoA_Batch2"
+outpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/Raw_drug_target_median_profiles"
+
+
+# path of MoA's annotation
+moa_path <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/metadata/target_ID_MoA.csv"
+
+# Path of platemap of target_ID
+
+platemap.path <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/metadata/target_ID_platemap_A549.csv"
+
+
+
+# final list of metadata and variables
+
+final_metadata_path <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/metadata/metadata_list.txt"
+final_variables_path <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/metadata/variables_list.txt"
+
+final_metadata <- read.table(final_metadata_path, header = F) %>% 
+                        as.matrix() %>% 
+                        as.vector() %>% 
+                        unlist()
+final_variables <- read.table(final_variables_path, header = F) %>% 
+                        as.matrix() %>% 
+                        as.vector() %>% 
+                        unlist()
+
+
+
+# Taking the Metadata from augmented csv and joining with moa columns and finally selecting desired Metadata columns
+# reading and renaming column names and selecting substring of compound names and three Metadatacolumns
+
+moa <- readr::read_csv(moa_path) %>% 
+   rename(Metadata_broad_sample = BRD,
+          Metadata_moa = activity,
+          Metadata_submitter = submitter,
+          Metadata_pert_name = `common name`) %>%
+   select( Metadata_broad_sample, Metadata_moa, Metadata_pert_name, Metadata_submitter) %>% 
+   mutate(Metadata_broad_sample = str_sub(Metadata_broad_sample, 1, 13))
+
+
+
+# Taking the Metadata from augmented csv and joining with moa columns and finally selecting desired Metadata columns
+meta <- readr::read_csv(platemap.path) %>%
+   mutate(Metadata_broad_sample = str_sub(Metadata_broad_sample, 1, 13)) %>%
+   left_join(moa, by= "Metadata_broad_sample") %>%
+   distinct(Metadata_Plate, Metadata_Well, .keep_all = TRUE) %>% select_at(final_metadata) %>% dplyr::collect()
+
+
+
+# Path of Target Plates
+
+p.path <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/metadata/target_ID_plates.txt"
+
+plates <- read.table(p.path, header = F) %>% 
+                        as.matrix() %>% 
+                        as.vector() %>% 
+                        unlist()
+
+#Separating Plates for A549 Cellline
+
+plates_A549 <- plates[1:5]
+
+
+plate.list <- plates_A549
+
+
+f.path <- NULL
+data_A549 <- NULL
+metadata <- NULL
+
+for (p in 1:length(plate.list)) {
+
+      f.path[p] <- paste0(inpath, "/", plate.list[p], "/", plate.list[p], ".csv")
+      d_csv <- data.frame(readr::read_csv(f.path[p]), stringsAsFactors = TRUE)
+      prf <- d_csv %>% select_at(final_variables) %>% dplyr::collect()
+       # Aggregating profiles
+      data_A549 <- rbind(prf, data_A549)
+}
+
+      # Attaching metadata
+      target_A549 <- cbind(meta,  data_A549)
+      
+      
+# Mapping of Doses
+map_dose <- function(mmoles_per_liter) {
+  dose_mapping <- c(0.04, 0.12, 0.37, 1.11, 3.33, 10, 20)
+  names(dose_mapping) <- c("0.04 uM", "0.12 uM", "0.37 uM", "1.11 uM", "3.33 uM", "10 uM", "20 uM")
+  dose_mapping[which.min(abs(mmoles_per_liter - dose_mapping))]
+      }
+ # Appling map_dose function to the dose column     
+target_A549$Metadata_mmoles_per_liter <- sapply(target_A549$Metadata_mmoles_per_liter, map_dose)
+
+write.csv(target_A549, row.names=FALSE, file = paste0(outpath, "/", "Combined_target_A549", ".csv" ))
+
+
+```
+
+## Aggregating CSV's for Drug Repurposing
+## Note: for DrugRepurposing project I have used augmented CSV's which are unnormalized and have metadata information such as MoA and drug_name
+
+```{r}
+
+# path of backend files of Drug Repurposing project
+inpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/2015_10_05_DrugRepurposing_AravindSubramanian_GolubLab_Broad/2016_04_01_a549_48hr_batch1"
+
+
+outpath <- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/similarity_matrix/combined_median_target_Drug_CSV/Raw_drug_target_median_profiles"
+
+p.path<- "/Users/habbasi/Desktop/2016_03_14_TargetID_Wagner_Schenone_BWH/metadata/Drug_plates.txt"
+# final list of metadata and variables
+
+
+
+
+plate.list <- read.table(p.path, header = F) %>% 
+                        as.matrix() %>% 
+                        as.vector() %>% 
+                        unlist()
+
+
+f.path <- NULL
+data_drug <- NULL
+
+for (p in 1:length(plate.list)) {
+      f.path[p] <- paste0(inpath, "/", plate.list[p], "/", plate.list[p], "_augmented.csv")
+
+        d <- data.frame(readr::read_csv(f.path[p]), stringsAsFactors = TRUE)
+        d$Metadata_submitter <- NA # Making extra column Metadata_submitter
+       meta <- d[, final_metadata]  # selecting only final metadata variables
+      prf <- d %>%
+          select_at(final_variables)  %>%    # selecting final variables
+          dplyr::collect()
+      prf <- cbind(meta, prf)
+
+       data_drug <- rbind(prf, data_drug)   # Aggregating profiles
+
+     
+}
+
+      
+# Mapping of Doses
+map_dose <- function(mmoles_per_liter) {
+  dose_mapping <- c(0.04, 0.12, 0.37, 1.11, 3.33, 10, 20)
+  names(dose_mapping) <- c("0.04 uM", "0.12 uM", "0.37 uM", "1.11 uM", "3.33 uM", "10 uM", "20 uM")
+  dose_mapping[which.min(abs(mmoles_per_liter - dose_mapping))]
+      }
+ # Appling map_dose function to the dose column     
+data_drug$Metadata_mmoles_per_liter <- sapply(data_drug$Metadata_mmoles_per_liter, map_dose)
+
+
+ write.csv(data_drug, row.names=FALSE, file = paste0(outpath, "/", "Combined_drug", ".csv" ))
+
+ # combining target_ID and Drug_Repurposing dataset and shortening of Metadata_broad_sample name
+
+   data_final <- rbind(data_drug, target_A549) 
+  
+   
+  write.csv(data_final, row.names=FALSE, file = paste0(outpath, "/", "Combined_drug_target", ".csv" ))
+ 
+  
+
+
+```
+
